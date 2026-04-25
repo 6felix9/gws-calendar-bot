@@ -78,7 +78,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     photo = update.message.photo[-1]  # largest available size
-    caption = update.message.caption or "What's in this image? If it contains event details, help me add it to my calendar."
+    caption = update.message.caption or "If this image contains event details, help me add it to my calendar."
 
     await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
