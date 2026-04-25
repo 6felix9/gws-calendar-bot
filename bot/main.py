@@ -3,9 +3,10 @@ import logging
 import os
 
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
     ContextTypes,
@@ -13,6 +14,7 @@ from telegram.ext import (
 )
 
 from .agent import run_agent
+from .tools import _pending_events, _run_create_calendar_event
 
 load_dotenv()
 
@@ -21,6 +23,13 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+
+_CONFIRM_KEYBOARD = InlineKeyboardMarkup([
+    [
+        InlineKeyboardButton("✅ Confirm", callback_data="confirm"),
+        InlineKeyboardButton("❌ Cancel", callback_data="cancel"),
+    ]
+])
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -39,8 +48,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "• Add a dentist appointment on Friday at 3pm\n"
         "• Create a budget review meeting next Monday 2pm–3pm with alice@example.com\n"
         "• Book a standup every day at 9am for 30 minutes with a Meet link\n\n"
-        "I'll confirm the details before creating anything."
+        "I'll show you the event details and ask you to confirm before creating it."
     )
+
+
+async def _reply_with_agent_output(update: Update, chat_id: int, reply: str) -> None:
+    pending = _pending_events.get(chat_id)
+    if pending:
+        await update.message.reply_text(reply, reply_markup=_CONFIRM_KEYBOARD)
+    else:
+        await update.message.reply_text(reply)
 
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -55,7 +72,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         logger.error("Agent error for chat %s: %s", chat_id, e)
         reply = "Sorry, something went wrong. Please try again."
 
-    await update.message.reply_text(reply)
+    await _reply_with_agent_output(update, chat_id, reply)
 
 
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -74,7 +91,27 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.error("Agent error for chat %s: %s", chat_id, e)
         reply = "Sorry, something went wrong processing the image."
 
-    await update.message.reply_text(reply)
+    await _reply_with_agent_output(update, chat_id, reply)
+
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    chat_id = query.message.chat_id
+    await query.answer()
+
+    if query.data == "confirm":
+        pending = _pending_events.pop(chat_id, None)
+        await query.edit_message_reply_markup(reply_markup=None)
+        if not pending:
+            await query.message.reply_text("This proposal has already expired.")
+            return
+        result = _run_create_calendar_event(**pending)
+        await query.message.reply_text(result)
+
+    elif query.data == "cancel":
+        _pending_events.pop(chat_id, None)
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.message.reply_text("Event creation cancelled.")
 
 
 def main() -> None:
@@ -88,6 +125,7 @@ def main() -> None:
     app.add_handler(CommandHandler("help", help_command, filters=owner))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & owner, message_handler))
     app.add_handler(MessageHandler(filters.PHOTO & owner, photo_handler))
+    app.add_handler(CallbackQueryHandler(button_handler))
 
     logger.info("Bot starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
