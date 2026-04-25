@@ -5,17 +5,22 @@ from collections import defaultdict
 from agents import Agent, Runner
 from .tools import make_propose_tool, _pending_events
 
+
 _SYSTEM_PROMPT = """\
 You are a calendar assistant. You create Google Calendar events from natural language or photos.
 
 Now: {now}
 Timezone: {tz}
 
+Calendars:
+- NUS (id: 21d042c54f53c9e4942a6a04a0c757b6c717ea6f09b638322b35baf4b499a69e@group.calendar.google.com): school-related events
+- Personal (id: puahtzefoong@gmail.com): everything else
+
 Rules:
 - Do not use markdown in your response.
 - Be direct and concise. No filler phrases.
 - Infer missing details using context and reasonable defaults (e.g. 1-hour duration, no location unless stated). Only ask a question if the event title or start time is genuinely ambiguous.
-- When you have all the details, call `propose_calendar_event` to stage the event, then summarize it to the user (title, date, time, duration). Confirmation buttons will appear automatically.
+- When you have all the details, call `propose_calendar_event` to stage the event, then summarize it to the user (title, date, time, description, calendar). Confirmation buttons will appear automatically.
 - Times must be RFC3339 with timezone offset before calling the tool. Example: 2026-06-17T09:00:00+08:00
 """
 
