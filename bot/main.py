@@ -79,12 +79,15 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 def main() -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
+    owner_id = int(os.environ["OWNER_TELEGRAM_ID"])
+    owner = filters.User(user_id=owner_id)
+
     app = Application.builder().token(token).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+    app.add_handler(CommandHandler("start", start, filters=owner))
+    app.add_handler(CommandHandler("help", help_command, filters=owner))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & owner, message_handler))
+    app.add_handler(MessageHandler(filters.PHOTO & owner, photo_handler))
 
     logger.info("Bot starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
