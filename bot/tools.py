@@ -73,5 +73,5 @@ def _run_create_calendar_event(
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode == 0:
-        return f"Event '{summary}' created successfully.\n{result.stdout.strip()}"
+        return f"'{summary}' added to your calendar."
     return f"Failed to create event: {result.stderr.strip()}"
