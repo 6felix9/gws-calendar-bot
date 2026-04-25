@@ -105,7 +105,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if not pending:
             await query.message.reply_text("This proposal has already expired.")
             return
-        result = _run_create_calendar_event(**pending)
+        result = await _run_create_calendar_event(**pending)
         await query.message.reply_text(result)
 
     elif query.data == "cancel":

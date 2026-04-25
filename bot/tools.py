@@ -1,4 +1,4 @@
-import subprocess
+import asyncio
 from agents import function_tool
 
 # Per-chat pending event proposals awaiting confirmation
@@ -44,7 +44,7 @@ def make_propose_tool(chat_id: int):
     return propose_calendar_event
 
 
-def _run_create_calendar_event(
+async def _run_create_calendar_event(
     summary: str,
     start: str,
     end: str,
@@ -71,7 +71,18 @@ def _run_create_calendar_event(
     if calendar != "primary":
         cmd += ["--calendar", calendar]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode == 0:
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        return "Failed to create event: timed out."
+
+    if proc.returncode == 0:
         return f"'{summary}' added to your calendar."
-    return f"Failed to create event: {result.stderr.strip()}"
+    return f"Failed to create event: {stderr.decode().strip()}"
