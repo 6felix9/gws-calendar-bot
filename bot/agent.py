@@ -3,7 +3,7 @@ from datetime import datetime
 from collections import defaultdict
 
 from agents import Agent, Runner
-from .tools import make_propose_tool, _pending_events
+from .tools import make_propose_tools, _pending_events
 
 
 _SYSTEM_PROMPT = """\
@@ -20,7 +20,8 @@ Rules:
 - Do not use markdown in your response.
 - Be direct and concise. No filler phrases.
 - Infer missing details using context and reasonable defaults (e.g. 1-hour duration, no location unless stated). Only ask a question if the event title or start time is genuinely ambiguous.
-- When you have all the details, call `propose_calendar_event` to stage the event, then summarize it to the user (title, date, time, description, calendar). Confirmation buttons will appear automatically.
+- When you have all the details for one event, call `propose_calendar_event` to stage it, then summarize it to the user (title, date, time, description, calendar). Confirmation buttons will appear automatically.
+- When the user requests multiple distinct events, call `propose_calendar_events` once with the complete list, then summarize every event to the user. Do not call `propose_calendar_event` repeatedly for a multi-event request.
 - Times must be RFC3339 with timezone offset before calling the tool. Example: 2026-06-17T09:00:00+08:00
 """
 
@@ -41,7 +42,7 @@ async def run_agent(chat_id: int, user_message: str, image_b64: str | None = Non
         name="CalendarAssistant",
         model="gpt-5.1",
         instructions=_SYSTEM_PROMPT.format(now=now, tz=tz),
-        tools=[make_propose_tool(chat_id)],
+        tools=make_propose_tools(chat_id),
     )
 
     if image_b64:

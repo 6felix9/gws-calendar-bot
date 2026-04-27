@@ -1,11 +1,35 @@
 import asyncio
+from typing import Any
+
 from agents import function_tool
+from pydantic import BaseModel
+
+
+class CalendarEventProposal(BaseModel):
+    summary: str
+    start: str
+    end: str
+    location: str | None = None
+    description: str | None = None
+    attendees: list[str] | None = None
+    add_meet: bool = False
+    calendar: str = "primary"
+
 
 # Per-chat pending event proposals awaiting confirmation
-_pending_events: dict[int, dict] = {}
+_pending_events: dict[int, list[dict[str, Any]]] = {}
 
 
-def make_propose_tool(chat_id: int):
+def _stage_events(chat_id: int, events: list[CalendarEventProposal]) -> int:
+    staged = [event.model_dump() for event in events]
+    if staged:
+        _pending_events[chat_id] = staged
+    else:
+        _pending_events.pop(chat_id, None)
+    return len(staged)
+
+
+def make_propose_tools(chat_id: int):
     @function_tool
     def propose_calendar_event(
         summary: str,
@@ -29,19 +53,39 @@ def make_propose_tool(chat_id: int):
             add_meet: Set to true to add a Google Meet video link.
             calendar: Calendar ID (default 'primary').
         """
-        _pending_events[chat_id] = {
-            "summary": summary,
-            "start": start,
-            "end": end,
-            "location": location,
-            "description": description,
-            "attendees": attendees,
-            "add_meet": add_meet,
-            "calendar": calendar,
-        }
+        _stage_events(
+            chat_id,
+            [
+                CalendarEventProposal(
+                    summary=summary,
+                    start=start,
+                    end=end,
+                    location=location,
+                    description=description,
+                    attendees=attendees,
+                    add_meet=add_meet,
+                    calendar=calendar,
+                )
+            ],
+        )
         return "Event staged for confirmation."
 
-    return propose_calendar_event
+    @function_tool
+    def propose_calendar_events(events: list[CalendarEventProposal]) -> str:
+        """Stage multiple Google Calendar events for one user confirmation.
+
+        Use this when a user asks to create more than one distinct event. Each event
+        must include its own title, start time, end time, and calendar selection.
+
+        Args:
+            events: The complete list of event proposals to create after confirmation.
+        """
+        count = _stage_events(chat_id, events)
+        if count == 0:
+            return "No events staged for confirmation."
+        return f"{count} events staged for confirmation."
+
+    return [propose_calendar_event, propose_calendar_events]
 
 
 async def _run_create_calendar_event(
