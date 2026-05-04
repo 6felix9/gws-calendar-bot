@@ -1,10 +1,10 @@
 # Felix
 
-A Telegram bot that creates Google Calendar events from natural-language messages and photos.
+A Telegram bot that creates and views Google Calendar events from natural-language messages and photos.
 
 ## How it works
 
-Send Felix a message like "Lunch with Sarah on Friday at 1pm" or a photo of an event flyer, and it will create the event in your Google Calendar.
+Send Felix a message like "What do I have today?", "Lunch with Sarah on Friday at 1pm", or a photo of an event flyer. It can query your Google Calendar immediately, and it will ask for confirmation before creating new events.
 
 ## Setup
 

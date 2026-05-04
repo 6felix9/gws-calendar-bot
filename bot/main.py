@@ -35,8 +35,10 @@ _CONFIRM_KEYBOARD = InlineKeyboardMarkup([
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "Hi! I'm your calendar assistant.\n\n"
-        "Tell me about an event you'd like to schedule and I'll add it to your Google Calendar.\n\n"
-        "Example: \"Schedule a team sync tomorrow at 10am for 1 hour\"\n\n"
+        "Ask me what's on your calendar, or tell me about an event you'd like to schedule.\n\n"
+        "Examples:\n"
+        "\"What do I have today?\"\n"
+        "\"Schedule a team sync tomorrow at 10am for 1 hour\"\n\n"
         "Type /help for more examples."
     )
 
@@ -44,11 +46,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "Calendar Assistant — Examples:\n\n"
+        "View events:\n"
+        "• What do I have today?\n"
+        "• Show my NUS events tomorrow\n"
+        "• What's on my personal calendar next week?\n\n"
+        "Create events:\n"
         "• Schedule a team sync tomorrow at 10am for 1 hour\n"
         "• Add a dentist appointment on Friday at 3pm\n"
         "• Create a budget review meeting next Monday 2pm–3pm with alice@example.com\n"
         "• Book a standup every day at 9am for 30 minutes with a Meet link\n\n"
-        "I'll show you the event details and ask you to confirm before creating it."
+        "I'll answer calendar queries immediately. For new events, I'll show the event details and ask you to confirm before creating it."
     )
 
 
