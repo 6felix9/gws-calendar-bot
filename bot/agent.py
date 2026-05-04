@@ -1,32 +1,50 @@
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from collections import defaultdict
 
 from agents import Agent, Runner
-from .tools import make_propose_tool, _pending_events
+from .tools import CALENDARS, list_calendar_events, make_propose_tool, _pending_events
 
 
 _SYSTEM_PROMPT = """\
-You are a calendar assistant. You create Google Calendar events from natural language or photos.
+You are a calendar assistant. You create and view Google Calendar events from natural language or photos.
 
 Now: {now}
 Timezone: {tz}
 
 Calendars:
-- NUS (id: 21d042c54f53c9e4942a6a04a0c757b6c717ea6f09b638322b35baf4b499a69e@group.calendar.google.com): school-related events
-- Personal (id: puahtzefoong@gmail.com): everything else
+{calendars}
 
 Rules:
 - Do not use markdown in your response.
 - Be direct and concise. No filler phrases.
+- For viewing, listing, checking, or querying existing events, call `list_calendar_events` immediately. Calendar reads do not need confirmation.
+- For broad calendar queries, pass both NUS and Personal. If the user says NUS, school, class, or university, pass only NUS. If the user says personal, pass only Personal.
+- For calendar queries, infer date windows in the user's timezone. Use RFC3339 with timezone offset for `time_min` and `time_max`; `time_max` is exclusive.
+- For vague upcoming queries, use the next 7 days. For today/tomorrow/named dates, use that local day. For this week/next week, use the local Monday-to-Monday week window.
+- After `list_calendar_events` returns, summarize the result clearly with dates/times and event titles.
 - Infer missing details using context and reasonable defaults (e.g. 1-hour duration, no location unless stated). Only ask a question if the event title or start time is genuinely ambiguous.
-- When you have all the details, call `propose_calendar_event` to stage the event, then summarize it to the user (title, date, time, description, calendar). Confirmation buttons will appear automatically.
+- For creating events, when you have all the details, call `propose_calendar_event` to stage the event, then summarize it to the user (title, date, time, description, calendar). Confirmation buttons will appear automatically.
 - Times must be RFC3339 with timezone offset before calling the tool. Example: 2026-06-17T09:00:00+08:00
 """
 
-# Per-chat conversation history: chat_id -> list of message dicts
+
+_CALENDAR_PROMPT = "\n".join(
+    f"- {name} (id: {calendar['id']}): {calendar['description']}"
+    for name, calendar in CALENDARS.items()
+)
+
+
+def _now_in_timezone(tz: str) -> datetime:
+    try:
+        return datetime.now(ZoneInfo(tz))
+    except ZoneInfoNotFoundError:
+        return datetime.now(ZoneInfo("UTC"))
+
+
 _history: dict[int, list[dict]] = defaultdict(list)
-_MAX_HISTORY = 20  # keep last 20 messages per chat
+_MAX_HISTORY = 20
 
 
 async def run_agent(chat_id: int, user_message: str, image_b64: str | None = None) -> str:
@@ -36,12 +54,12 @@ async def run_agent(chat_id: int, user_message: str, image_b64: str | None = Non
     _pending_events.pop(chat_id, None)
 
     tz = os.getenv("USER_TIMEZONE", "UTC")
-    now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+    now = _now_in_timezone(tz).strftime("%Y-%m-%d %H:%M %z (%A)")
     agent = Agent(
         name="CalendarAssistant",
         model="gpt-5.1",
-        instructions=_SYSTEM_PROMPT.format(now=now, tz=tz),
-        tools=[make_propose_tool(chat_id)],
+        instructions=_SYSTEM_PROMPT.format(now=now, tz=tz, calendars=_CALENDAR_PROMPT),
+        tools=[make_propose_tool(chat_id), list_calendar_events],
     )
 
     if image_b64:
