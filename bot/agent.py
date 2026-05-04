@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from collections import defaultdict
 
 from agents import Agent, Runner
-from .tools import CALENDARS, list_calendar_events, make_propose_tool, _pending_events
+from .tools import CALENDARS, list_calendar_events, make_propose_tools, _pending_events
 
 
 _SYSTEM_PROMPT = """\
@@ -25,7 +25,8 @@ Rules:
 - For vague upcoming queries, use the next 7 days. For today/tomorrow/named dates, use that local day. For this week/next week, use the local Monday-to-Monday week window.
 - After `list_calendar_events` returns, summarize the result clearly with dates/times and event titles.
 - Infer missing details using context and reasonable defaults (e.g. 1-hour duration, no location unless stated). Only ask a question if the event title or start time is genuinely ambiguous.
-- For creating events, when you have all the details, call `propose_calendar_event` to stage the event, then summarize it to the user (title, date, time, description, calendar). Confirmation buttons will appear automatically.
+- When you have all the details for one event, call `propose_calendar_event` to stage it, then summarize it to the user (title, date, time, description, calendar). Confirmation buttons will appear automatically.
+- When the user requests multiple distinct events, call `propose_calendar_events` once with the complete list, then summarize every event to the user. Do not call `propose_calendar_event` repeatedly for a multi-event request.
 - Times must be RFC3339 with timezone offset before calling the tool. Example: 2026-06-17T09:00:00+08:00
 """
 
@@ -59,7 +60,7 @@ async def run_agent(chat_id: int, user_message: str, image_b64: str | None = Non
         name="CalendarAssistant",
         model="gpt-5.1",
         instructions=_SYSTEM_PROMPT.format(now=now, tz=tz, calendars=_CALENDAR_PROMPT),
-        tools=[make_propose_tool(chat_id), list_calendar_events],
+        tools=[*make_propose_tools(chat_id), list_calendar_events],
     )
 
     if image_b64:

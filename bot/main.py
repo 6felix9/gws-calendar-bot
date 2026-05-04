@@ -107,13 +107,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await query.answer()
 
     if query.data == "confirm":
-        pending = _pending_events.pop(chat_id, None)
+        pending_events = _pending_events.pop(chat_id, None)
         await query.edit_message_reply_markup(reply_markup=None)
-        if not pending:
+        if not pending_events:
             await query.message.reply_text("This proposal has already expired.")
             return
-        result = await _run_create_calendar_event(**pending)
-        await query.message.reply_text(result)
+
+        results = []
+        for event in pending_events:
+            results.append(await _run_create_calendar_event(**event))
+
+        if len(results) == 1:
+            await query.message.reply_text(results[0])
+        else:
+            numbered_results = [
+                f"{index}. {result}"
+                for index, result in enumerate(results, start=1)
+            ]
+            await query.message.reply_text("\n".join(numbered_results))
 
     elif query.data == "cancel":
         _pending_events.pop(chat_id, None)
