@@ -35,8 +35,8 @@ jobs:
           script: |
             echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
 
-            mkdir -p /opt/felix
-            echo "$GWS_CREDENTIALS" > /opt/felix/gws-credentials.json
+            mkdir -p /opt/felix /opt/felix/gws-config
+            echo "$GWS_CREDENTIALS" > /opt/felix/gws-config/credentials.json
 
             docker pull "$DOCKERHUB_USERNAME/felix-bot:latest"
 
@@ -49,9 +49,11 @@ jobs:
               -e TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" \
               -e OPENAI_API_KEY="$OPENAI_API_KEY" \
               -e OWNER_TELEGRAM_ID="$OWNER_TELEGRAM_ID" \
-              -e GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/gws-credentials.json \
+              -e GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/gws-config/credentials.json \
+              -e GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file \
+              -e GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/gws-config \
               -e USER_TIMEZONE=Asia/Kuala_Lumpur \
-              -v /opt/felix/gws-credentials.json:/gws-credentials.json:ro \
+              -v /opt/felix/gws-config:/gws-config \
               "$DOCKERHUB_USERNAME/felix-bot:latest"
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
