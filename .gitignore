@@ -1,5 +1,6 @@
 # Local assistant/tooling files
 .claude/
+.agents/
 
 # Environment files
 .env
