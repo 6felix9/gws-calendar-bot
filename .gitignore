@@ -36,3 +36,6 @@ dist/
 .vscode/
 *.swp
 *.swo
+
+# Node (Railway IaC SDK)
+node_modules/

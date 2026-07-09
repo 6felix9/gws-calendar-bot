@@ -5,62 +5,13 @@ on:
     branches: [main]
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-
+    container: ghcr.io/railwayapp/cli:latest
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and push image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/felix-bot:latest
-
-      - name: Deploy to Droplet
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.DROPLET_HOST }}
-          username: root
-          key: ${{ secrets.DROPLET_SSH_KEY }}
-          envs: DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,TELEGRAM_BOT_TOKEN,OPENAI_API_KEY,GWS_CREDENTIALS,GWS_CLIENT_SECRET,OWNER_TELEGRAM_ID
-          script: |
-            echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
-
-            mkdir -p /opt/felix /opt/felix/gws-config
-            echo "$GWS_CREDENTIALS" > /opt/felix/gws-config/credentials.json
-            echo "$GWS_CLIENT_SECRET" > /opt/felix/gws-config/client_secret.json
-
-            docker pull "$DOCKERHUB_USERNAME/felix-bot:latest"
-
-            docker stop felix-bot || true
-            docker rm felix-bot || true
-
-            docker run -d \
-              --name felix-bot \
-              --restart unless-stopped \
-              -e TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" \
-              -e OPENAI_API_KEY="$OPENAI_API_KEY" \
-              -e OWNER_TELEGRAM_ID="$OWNER_TELEGRAM_ID" \
-              -e GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/gws-config/credentials.json \
-              -e GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file \
-              -e GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/gws-config \
-              -e USER_TIMEZONE=Asia/Kuala_Lumpur \
-              -v /opt/felix/gws-config:/gws-config \
-              "$DOCKERHUB_USERNAME/felix-bot:latest"
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GWS_CREDENTIALS: ${{ secrets.GWS_CREDENTIALS }}
-          GWS_CLIENT_SECRET: ${{ secrets.GWS_CLIENT_SECRET }}
-          OWNER_TELEGRAM_ID: ${{ secrets.OWNER_TELEGRAM_ID }}
+      - name: Deploy to Railway
+        run: railway up --service gws-calendar-bot --environment production --detach -m "${{ github.event.head_commit.message }}"

@@ -13,6 +13,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-ENV USER_TIMEZONE=Asia/Kuala_Lumpur
+RUN chmod +x scripts/railway-entrypoint.sh
 
-CMD ["python", "-m", "bot.main"]
+ENV USER_TIMEZONE=Asia/Kuala_Lumpur
+ENV GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/gws-config/credentials.json
+ENV GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file
+ENV GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/gws-config
+
+ENTRYPOINT ["/app/scripts/railway-entrypoint.sh"]

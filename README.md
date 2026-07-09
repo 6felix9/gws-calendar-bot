@@ -1,6 +1,6 @@
-# Felix
+# Felix's Calendar Agent
 
-A Telegram bot that creates and views Google Calendar events from natural-language messages and photos.
+A Telegram bot (`gws-calendar-bot`) that creates and views Google Calendar events from natural-language messages and photos.
 
 ## How it works
 
@@ -25,7 +25,30 @@ cp .env.example .env
 | `OWNER_TELEGRAM_ID` | yes | Your Telegram user ID (bot ignores other users) |
 | `USER_TIMEZONE` | no | Default: `Asia/Kuala_Lumpur` |
 | `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` | yes (runtime) | Path to GWS credentials JSON |
+| `GWS_CREDENTIALS` | yes (Railway) | Full JSON written to `/gws-config/credentials.json` at startup |
+| `GWS_CLIENT_SECRET` | yes (Railway) | OAuth client secret JSON written to `/gws-config/client_secret.json` |
 
-## Deployment
+## Deployment (Railway)
 
-Push to `main` — GitHub Actions builds a Docker image and deploys it to a DigitalOcean Droplet. Required secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, `TELEGRAM_BOT_TOKEN`, `OPENAI_API_KEY`, `GWS_CREDENTIALS`, `DROPLET_HOST`, `DROPLET_SSH_KEY`.
+Push to `main` — GitHub Actions runs `railway up` against the **gws-calendar-bot** service in the **Felix's Calendar Agent** project. Add a project-scoped `RAILWAY_TOKEN` as a GitHub secret.
+
+Manual deploy from this directory:
+
+```bash
+railway link --project "Felix's Calendar Agent" --service gws-calendar-bot
+railway up --detach -m "local deploy"
+```
+
+Infra (variables, volumes, service settings) is managed via the Railway CLI or dashboard — not checked into this repo.
+
+Set secrets on the service:
+
+```bash
+railway variable set TELEGRAM_BOT_TOKEN=... --service gws-calendar-bot
+railway variable set OPENAI_API_KEY=... --service gws-calendar-bot
+railway variable set OWNER_TELEGRAM_ID=... --service gws-calendar-bot
+printf '%s' "$GWS_JSON" | railway variable set GWS_CREDENTIALS --stdin --service gws-calendar-bot
+printf '%s' "$CLIENT_SECRET_JSON" | railway variable set GWS_CLIENT_SECRET --stdin --service gws-calendar-bot
+```
+
+After Railway is live, stop the old DigitalOcean container so only one bot polls Telegram.
