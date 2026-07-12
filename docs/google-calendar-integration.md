@@ -9,12 +9,12 @@ User message or photo
   → bot/main.py    (Telegram handlers)
   → bot/agent.py   (OpenAI agent with calendar tools)
   → bot/tools.py   (stage proposals or run gws reads/writes)
-  → bot/main.py    (per-event Confirm/Cancel inline buttons for creates/deletes)
-  → bot/tools.py   (_run_create_calendar_event / _run_delete_calendar_event shells out to `gws`)
-  → Google Calendar (event created or deleted via gws CLI)
+  → bot/main.py    (per-event Confirm/Cancel inline buttons for creates/edits/deletes)
+  → bot/tools.py   (_run_create_calendar_event / _run_edit_calendar_event / _run_delete_calendar_event shells out to `gws`)
+  → Google Calendar (event created, updated, or deleted via gws CLI)
 ```
 
-The key design choice for **creates and deletes**: the agent **proposes** actions first (no side effects), then the user confirms via Telegram inline buttons before anything changes. Never skip this two-step flow — it is a deliberate safety gate.
+The key design choice for **creates, edits, and deletes**: the agent **proposes** actions first (no side effects), then the user confirms via Telegram inline buttons before anything changes. Never skip this two-step flow — it is a deliberate safety gate.
 
 **Reads** (`list_calendar_events`) run immediately with no confirmation.
 
@@ -39,6 +39,16 @@ gws calendar +insert \
 gws calendar events delete \
   --params '{"calendarId":"...", "eventId":"..."}'
 ```
+
+### Editing an event
+
+```bash
+gws calendar events patch \
+  --params '{"calendarId":"...", "eventId":"..."}' \
+  --json '{"summary":"New title","start":{"dateTime":"2026-06-17T10:00:00+08:00"},"end":{"dateTime":"2026-06-17T11:00:00+08:00"}}'
+```
+
+Only include fields that should change in the JSON body.
 
 ### Listing events
 
@@ -86,9 +96,9 @@ The Claude Code skills for `gws` live in `.claude/skills/`:
 
 ## Code walkthrough
 
-### `bot/tools.py` — two-phase create/delete design
+### `bot/tools.py` — two-phase create/edit/delete design
 
-**Phase 1: propose** (`propose_calendar_event`, `propose_calendar_events`, `propose_delete_calendar_event`, `propose_delete_calendar_events`)
+**Phase 1: propose** (`propose_calendar_event`, `propose_calendar_events`, `propose_edit_calendar_event`, `propose_edit_calendar_events`, `propose_delete_calendar_event`, `propose_delete_calendar_events`)
 
 The agent calls one of these tools. They only write to an in-memory dict — no subprocess, no side effects.
 
@@ -99,6 +109,8 @@ _pending_events: dict[int, list[dict[str, Any]]] = {}
 
 - **Create one:** `propose_calendar_event` stages one `CalendarEventProposal` with `"action": "create"`.
 - **Create many:** `propose_calendar_events` stages the full list in one call.
+- **Edit one:** `propose_edit_calendar_event` stages one `CalendarEventEditProposal` with `"action": "edit"`.
+- **Edit many:** `propose_edit_calendar_events` stages the full list in one call.
 - **Delete one:** `propose_delete_calendar_event` stages one `CalendarEventDeleteProposal` with `"action": "delete"`.
 - **Delete many:** `propose_delete_calendar_events` stages the full list in one call.
 
@@ -115,15 +127,19 @@ def _stage_pending(chat_id: int, items: list[dict[str, Any]]) -> int:
 
 Staged create dict keys: `action`, `summary`, `start`, `end`, `location`, `description`, `attendees`, `add_meet`, `calendar`.
 
+Staged edit dict keys: `action`, `event_id`, `calendar`, `summary`, and any changed fields (`new_summary`, `start`, `end`, `location`, `description`, `attendees`).
+
 Staged delete dict keys: `action`, `event_id`, `calendar`, `summary`, optional `start`.
 
 `make_propose_tools(chat_id)` is a factory because the tools need the chat ID in their closure. New tool instances are created per agent run.
 
-**Phase 2: execute** (`_run_create_calendar_event`, `_run_delete_calendar_event`)
+**Phase 2: execute** (`_run_create_calendar_event`, `_run_edit_calendar_event`, `_run_delete_calendar_event`)
 
 Called by `main.py` only after the user taps Confirm on a specific item. Each runs an async subprocess with a 30-second timeout.
 
 Create: `gws calendar +insert ...`
+
+Edit: `gws calendar events patch --params '...' --json '...'`
 
 Delete: `gws calendar events delete --params '{"calendarId":"...","eventId":"..."}'`
 
@@ -131,7 +147,7 @@ On success (returncode 0) returns a confirmation string. On failure returns the 
 
 **Reads** (`list_calendar_events`)
 
-Runs immediately when the agent needs to view events. Resolves calendar names/IDs via the `CALENDARS` dict, shells out to `gws calendar events list`, and returns a formatted text summary including **Event ID** and **Calendar ID** for each event (used by delete tools; the agent should not show raw IDs to the user). No confirmation gate.
+Runs immediately when the agent needs to view events. Resolves calendar names/IDs via the `CALENDARS` dict, shells out to `gws calendar events list`, and returns a formatted text summary including **Event ID** and **Calendar ID** for each event (used by edit and delete tools; the agent should not show raw IDs to the user). No confirmation gate.
 
 ### `bot/agent.py` — system prompt with calendar context
 
@@ -164,17 +180,18 @@ if pending:
 
 ```
 ✅ Confirm: Team sync         ❌ Cancel
-✅ Confirm delete: Lunch      ❌ Cancel
+✅ Confirm edit: Lunch        ❌ Cancel
+✅ Confirm delete: Dinner     ❌ Cancel
 ```
 
-- Create rows use `Confirm: {title}`; delete rows use `Confirm delete: {title}`.
+- Create rows use `Confirm: {title}`; edit rows use `Confirm edit: {title}`; delete rows use `Confirm delete: {title}`.
 - Button labels truncate long titles (~30 chars).
 - `callback_data` is `confirm:{index}` or `cancel:{index}` (0-based index into the current pending list).
 
 The `button_handler` handles per-item Confirm/Cancel:
 
-- **Confirm (`confirm:{i}`):** pops that item from `_pending_events[chat_id]`, dispatches to `_run_create_calendar_event` or `_run_delete_calendar_event` based on `action`, replies with the result, and refreshes the keyboard on the original message (or removes it if no items remain).
-- **Cancel (`cancel:{i}`):** removes that item from the list, replies `Cancelled: {summary}` or `Cancelled delete: {summary}`, and refreshes/clears the keyboard the same way.
+- **Confirm (`confirm:{i}`):** pops that item from `_pending_events[chat_id]`, dispatches to `_run_create_calendar_event`, `_run_edit_calendar_event`, or `_run_delete_calendar_event` based on `action`, replies with the result, and refreshes the keyboard on the original message (or removes it if no items remain).
+- **Cancel (`cancel:{i}`):** removes that item from the list, replies `Cancelled: {summary}`, `Cancelled edit: {summary}`, or `Cancelled delete: {summary}`, and refreshes/clears the keyboard the same way.
 - **Expired:** if the list is gone, the index is invalid, or callback data is malformed, replies "This proposal has already expired." and clears the keyboard.
 
 Users can confirm some items and cancel others independently within the same batch.

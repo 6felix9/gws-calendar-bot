@@ -1,10 +1,10 @@
 # Felix's Calendar Agent
 
-A Telegram bot (`gws-calendar-bot`) that creates, views, and deletes Google Calendar events from natural-language messages and photos.
+A Telegram bot (`gws-calendar-bot`) that creates, views, edits, and deletes Google Calendar events from natural-language messages and photos.
 
 ## How it works
 
-Send Felix a message like "What do I have today?", "Lunch with Sarah on Friday at 1pm", "Delete my lunch tomorrow", or a photo of an event flyer. It can query your Google Calendar immediately. Creating or deleting events requires confirmation — each staged event gets its own Confirm/Cancel buttons, including when multiple events are proposed at once.
+Send Felix a message like "What do I have today?", "Lunch with Sarah on Friday at 1pm", "Move my lunch tomorrow to 1pm", "Delete my lunch tomorrow", or a photo of an event flyer. It can query your Google Calendar immediately. Creating, editing, or deleting events requires confirmation — each staged change gets its own Confirm/Cancel buttons, including when multiple events are proposed at once.
 
 ## Setup
 

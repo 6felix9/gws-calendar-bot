@@ -27,6 +27,18 @@ class CalendarEventDeleteProposal(BaseModel):
     start: str | None = None
 
 
+class CalendarEventEditProposal(BaseModel):
+    event_id: str
+    calendar: str
+    summary: str
+    new_summary: str | None = None
+    start: str | None = None
+    end: str | None = None
+    location: str | None = None
+    description: str | None = None
+    attendees: list[str] | None = None
+
+
 # Per-chat pending event proposals awaiting confirmation
 _pending_events: dict[int, list[dict[str, Any]]] = {}
 
@@ -106,6 +118,31 @@ def _stage_deletes(chat_id: int, events: list[CalendarEventDeleteProposal]) -> i
         }
         for event in events
     ]
+    return _stage_pending(chat_id, staged)
+
+
+def _stage_edits(chat_id: int, events: list[CalendarEventEditProposal]) -> int:
+    staged = []
+    for event in events:
+        payload: dict[str, Any] = {
+            "action": "edit",
+            "event_id": event.event_id,
+            "calendar": event.calendar,
+            "summary": event.summary,
+        }
+        if event.new_summary is not None:
+            payload["new_summary"] = event.new_summary
+        if event.start is not None:
+            payload["start"] = event.start
+        if event.end is not None:
+            payload["end"] = event.end
+        if event.location is not None:
+            payload["location"] = event.location
+        if event.description is not None:
+            payload["description"] = event.description
+        if event.attendees is not None:
+            payload["attendees"] = event.attendees
+        staged.append(payload)
     return _stage_pending(chat_id, staged)
 
 
@@ -208,11 +245,74 @@ def make_propose_tools(chat_id: int):
             return "No events staged for deletion."
         return f"{count} events staged for deletion."
 
+    @function_tool
+    def propose_edit_calendar_event(
+        event_id: str,
+        calendar: str,
+        summary: str,
+        new_summary: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        location: str | None = None,
+        description: str | None = None,
+        attendees: list[str] | None = None,
+    ) -> str:
+        """Stage a Google Calendar event edit for user confirmation.
+
+        Include only fields that should change. At least one of new_summary, start,
+        end, location, description, or attendees must be set.
+
+        Args:
+            event_id: Event ID from list_calendar_events.
+            calendar: Calendar ID from list_calendar_events.
+            summary: Current event title for display in confirmation buttons.
+            new_summary: New event title, if changing.
+            start: New start time in RFC3339 format.
+            end: New end time in RFC3339 format.
+            location: New location.
+            description: New description.
+            attendees: New attendee email list (replaces existing attendees).
+        """
+        _stage_edits(
+            chat_id,
+            [
+                CalendarEventEditProposal(
+                    event_id=event_id,
+                    calendar=calendar,
+                    summary=summary,
+                    new_summary=new_summary,
+                    start=start,
+                    end=end,
+                    location=location,
+                    description=description,
+                    attendees=attendees,
+                )
+            ],
+        )
+        return "Event staged for edit."
+
+    @function_tool
+    def propose_edit_calendar_events(events: list[CalendarEventEditProposal]) -> str:
+        """Stage multiple Google Calendar event edits for user confirmation.
+
+        Use when the user asks to edit more than one distinct event. Each entry must
+        include event_id, calendar, summary, and at least one field to change.
+
+        Args:
+            events: The complete list of event edits to apply after confirmation.
+        """
+        count = _stage_edits(chat_id, events)
+        if count == 0:
+            return "No events staged for edit."
+        return f"{count} events staged for edit."
+
     return [
         propose_calendar_event,
         propose_calendar_events,
         propose_delete_calendar_event,
         propose_delete_calendar_events,
+        propose_edit_calendar_event,
+        propose_edit_calendar_events,
     ]
 
 
@@ -422,3 +522,82 @@ async def _run_delete_calendar_event(
         summary, proc.returncode, stderr_text,
     )
     return f"Failed to delete event: {stderr_text}"
+
+
+def _build_edit_patch_body(
+    new_summary: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    location: str | None = None,
+    description: str | None = None,
+    attendees: list[str] | None = None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {}
+    if new_summary is not None:
+        body["summary"] = new_summary
+    if start is not None:
+        body["start"] = {"dateTime": start}
+    if end is not None:
+        body["end"] = {"dateTime": end}
+    if location is not None:
+        body["location"] = location
+    if description is not None:
+        body["description"] = description
+    if attendees is not None:
+        body["attendees"] = [{"email": email} for email in attendees]
+    return body
+
+
+async def _run_edit_calendar_event(
+    event_id: str,
+    calendar: str,
+    summary: str,
+    new_summary: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    location: str | None = None,
+    description: str | None = None,
+    attendees: list[str] | None = None,
+) -> str:
+    patch_body = _build_edit_patch_body(
+        new_summary=new_summary,
+        start=start,
+        end=end,
+        location=location,
+        description=description,
+        attendees=attendees,
+    )
+    if not patch_body:
+        return "Failed to edit event: no fields to update."
+
+    calendar_id = _resolve_calendar_id(calendar)
+    params = {"calendarId": calendar_id, "eventId": event_id}
+    cmd = [
+        "gws", "calendar", "events", "patch",
+        "--params", json.dumps(params),
+        "--json", json.dumps(patch_body),
+    ]
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        logger.error("gws calendar events patch timed out (summary=%r)", summary)
+        return "Failed to edit event: timed out."
+
+    display_name = new_summary or summary
+    if proc.returncode == 0:
+        return f"'{display_name}' updated on your calendar."
+
+    stderr_text = stderr.decode().strip()
+    logger.error(
+        "gws calendar events patch failed (summary=%r, exit=%s): %s",
+        summary, proc.returncode, stderr_text,
+    )
+    return f"Failed to edit event: {stderr_text}"

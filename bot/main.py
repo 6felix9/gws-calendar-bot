@@ -14,7 +14,12 @@ from telegram.ext import (
 )
 
 from .agent import run_agent
-from .tools import _pending_events, _run_create_calendar_event, _run_delete_calendar_event
+from .tools import (
+    _pending_events,
+    _run_create_calendar_event,
+    _run_delete_calendar_event,
+    _run_edit_calendar_event,
+)
 
 load_dotenv()
 
@@ -32,16 +37,21 @@ def _short_button_label(summary: str, max_len: int = 30) -> str:
     return f"{title[: max_len - 3].rstrip()}..."
 
 
+def _confirm_label(event: dict, index: int) -> str:
+    label = _short_button_label(event.get("summary") or f"Event {index + 1}")
+    action = event.get("action", "create")
+    if action == "delete":
+        return f"✅ Confirm delete: {label}"
+    if action == "edit":
+        return f"✅ Confirm edit: {label}"
+    return f"✅ Confirm: {label}"
+
+
 def _confirm_keyboard(events: list[dict]) -> InlineKeyboardMarkup:
     rows = []
     for index, event in enumerate(events):
-        label = _short_button_label(event.get("summary") or f"Event {index + 1}")
-        if event.get("action") == "delete":
-            confirm_text = f"✅ Confirm delete: {label}"
-        else:
-            confirm_text = f"✅ Confirm: {label}"
         rows.append([
-            InlineKeyboardButton(confirm_text, callback_data=f"confirm:{index}"),
+            InlineKeyboardButton(_confirm_label(event, index), callback_data=f"confirm:{index}"),
             InlineKeyboardButton("❌ Cancel", callback_data=f"cancel:{index}"),
         ])
     return InlineKeyboardMarkup(rows)
@@ -52,6 +62,8 @@ async def _execute_pending_item(item: dict) -> str:
     payload = {key: value for key, value in item.items() if key != "action"}
     if action == "delete":
         return await _run_delete_calendar_event(**payload)
+    if action == "edit":
+        return await _run_edit_calendar_event(**payload)
     return await _run_create_calendar_event(**payload)
 
 
@@ -87,7 +99,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "Delete events:\n"
         "• Delete my lunch tomorrow\n"
         "• Remove the team sync on Friday\n\n"
-        "I'll answer calendar queries immediately. Creating or deleting events requires confirmation via inline buttons."
+        "Edit events:\n"
+        "• Move my lunch tomorrow to 1pm\n"
+        "• Rename Friday's team sync to Project sync\n\n"
+        "I'll answer calendar queries immediately. Creating, editing, or deleting events requires confirmation via inline buttons."
     )
 
 
@@ -167,15 +182,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.message.reply_text(result)
     elif action == "cancel":
         summary = pending_events[index].get("summary") or "Event"
-        is_delete = pending_events[index].get("action") == "delete"
+        pending_action = pending_events[index].get("action", "create")
         pending_events.pop(index)
         if pending_events:
             _pending_events[chat_id] = pending_events
         else:
             _pending_events.pop(chat_id, None)
         await _refresh_proposal_keyboard(query, chat_id)
-        if is_delete:
+        if pending_action == "delete":
             await query.message.reply_text(f"Cancelled delete: {summary}")
+        elif pending_action == "edit":
+            await query.message.reply_text(f"Cancelled edit: {summary}")
         else:
             await query.message.reply_text(f"Cancelled: {summary}")
     else:
