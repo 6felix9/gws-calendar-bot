@@ -94,20 +94,30 @@ def _shorten(text: str, limit: int = 180) -> str:
     return f"{compact[: limit - 3].rstrip()}..."
 
 
-def _stage_pending(chat_id: int, items: list[dict[str, Any]]) -> int:
-    if items:
-        _pending_events[chat_id] = items
-    else:
-        _pending_events.pop(chat_id, None)
-    return len(items)
+def _stage_pending(chat_id: int, items: list[dict[str, Any]]) -> tuple[int, int]:
+    if not items:
+        total = len(_pending_events.get(chat_id, []))
+        return 0, total
+    pending = _pending_events.setdefault(chat_id, [])
+    added = len(items)
+    pending.extend(items)
+    return added, len(pending)
 
 
-def _stage_events(chat_id: int, events: list[CalendarEventProposal]) -> int:
+def _stage_status_message(added: int, total: int, singular: str, plural: str) -> str:
+    if added == 0:
+        return f"No {plural} staged ({total} pending)."
+    if added == 1:
+        return f"1 {singular} staged ({total} pending)."
+    return f"{added} {plural} staged ({total} pending)."
+
+
+def _stage_events(chat_id: int, events: list[CalendarEventProposal]) -> tuple[int, int]:
     staged = [{**event.model_dump(), "action": "create"} for event in events]
     return _stage_pending(chat_id, staged)
 
 
-def _stage_deletes(chat_id: int, events: list[CalendarEventDeleteProposal]) -> int:
+def _stage_deletes(chat_id: int, events: list[CalendarEventDeleteProposal]) -> tuple[int, int]:
     staged = [
         {
             "action": "delete",
@@ -121,7 +131,7 @@ def _stage_deletes(chat_id: int, events: list[CalendarEventDeleteProposal]) -> i
     return _stage_pending(chat_id, staged)
 
 
-def _stage_edits(chat_id: int, events: list[CalendarEventEditProposal]) -> int:
+def _stage_edits(chat_id: int, events: list[CalendarEventEditProposal]) -> tuple[int, int]:
     staged = []
     for event in events:
         payload: dict[str, Any] = {
@@ -170,7 +180,7 @@ def make_propose_tools(chat_id: int):
             add_meet: Set to true to add a Google Meet video link.
             calendar: Calendar ID (default 'primary').
         """
-        _stage_events(
+        added, total = _stage_events(
             chat_id,
             [
                 CalendarEventProposal(
@@ -185,11 +195,11 @@ def make_propose_tools(chat_id: int):
                 )
             ],
         )
-        return "Event staged for confirmation."
+        return _stage_status_message(added, total, "event for confirmation", "events for confirmation")
 
     @function_tool
     def propose_calendar_events(events: list[CalendarEventProposal]) -> str:
-        """Stage multiple Google Calendar events for one user confirmation.
+        """Stage multiple Google Calendar events for user confirmation.
 
         Use this when a user asks to create more than one distinct event. Each event
         must include its own title, start time, end time, and calendar selection.
@@ -197,10 +207,8 @@ def make_propose_tools(chat_id: int):
         Args:
             events: The complete list of event proposals to create after confirmation.
         """
-        count = _stage_events(chat_id, events)
-        if count == 0:
-            return "No events staged for confirmation."
-        return f"{count} events staged for confirmation."
+        added, total = _stage_events(chat_id, events)
+        return _stage_status_message(added, total, "event for confirmation", "events for confirmation")
 
     @function_tool
     def propose_delete_calendar_event(
@@ -217,7 +225,7 @@ def make_propose_tools(chat_id: int):
             summary: Event title for display in confirmation buttons.
             start: Optional start time for display in the summary.
         """
-        _stage_deletes(
+        added, total = _stage_deletes(
             chat_id,
             [
                 CalendarEventDeleteProposal(
@@ -228,7 +236,7 @@ def make_propose_tools(chat_id: int):
                 )
             ],
         )
-        return "Event staged for deletion."
+        return _stage_status_message(added, total, "delete", "deletes")
 
     @function_tool
     def propose_delete_calendar_events(events: list[CalendarEventDeleteProposal]) -> str:
@@ -240,10 +248,8 @@ def make_propose_tools(chat_id: int):
         Args:
             events: The complete list of events to delete after confirmation.
         """
-        count = _stage_deletes(chat_id, events)
-        if count == 0:
-            return "No events staged for deletion."
-        return f"{count} events staged for deletion."
+        added, total = _stage_deletes(chat_id, events)
+        return _stage_status_message(added, total, "delete", "deletes")
 
     @function_tool
     def propose_edit_calendar_event(
@@ -273,7 +279,7 @@ def make_propose_tools(chat_id: int):
             description: New description.
             attendees: New attendee email list (replaces existing attendees).
         """
-        _stage_edits(
+        added, total = _stage_edits(
             chat_id,
             [
                 CalendarEventEditProposal(
@@ -289,7 +295,7 @@ def make_propose_tools(chat_id: int):
                 )
             ],
         )
-        return "Event staged for edit."
+        return _stage_status_message(added, total, "edit", "edits")
 
     @function_tool
     def propose_edit_calendar_events(events: list[CalendarEventEditProposal]) -> str:
@@ -301,10 +307,8 @@ def make_propose_tools(chat_id: int):
         Args:
             events: The complete list of event edits to apply after confirmation.
         """
-        count = _stage_edits(chat_id, events)
-        if count == 0:
-            return "No events staged for edit."
-        return f"{count} events staged for edit."
+        added, total = _stage_edits(chat_id, events)
+        return _stage_status_message(added, total, "edit", "edits")
 
     return [
         propose_calendar_event,

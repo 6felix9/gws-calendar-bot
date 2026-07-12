@@ -114,16 +114,20 @@ _pending_events: dict[int, list[dict[str, Any]]] = {}
 - **Delete one:** `propose_delete_calendar_event` stages one `CalendarEventDeleteProposal` with `"action": "delete"`.
 - **Delete many:** `propose_delete_calendar_events` stages the full list in one call.
 
-Staging always **replaces** the pending list for that chat:
+Staging **appends** within a turn (cleared at the start of each `run_agent` call), so mixed create/edit/delete actions share one pending list and one keyboard:
 
 ```python
-def _stage_pending(chat_id: int, items: list[dict[str, Any]]) -> int:
-    if items:
-        _pending_events[chat_id] = items
-    else:
-        _pending_events.pop(chat_id, None)
-    return len(items)
+def _stage_pending(chat_id: int, items: list[dict[str, Any]]) -> tuple[int, int]:
+    if not items:
+        total = len(_pending_events.get(chat_id, []))
+        return 0, total
+    pending = _pending_events.setdefault(chat_id, [])
+    added = len(items)
+    pending.extend(items)
+    return added, len(pending)
 ```
+
+Each propose tool returns how many items it added and the total pending count, e.g. `1 delete staged (2 pending).`
 
 Staged create dict keys: `action`, `summary`, `start`, `end`, `location`, `description`, `attendees`, `add_meet`, `calendar`.
 
