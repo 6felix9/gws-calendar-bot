@@ -4,7 +4,7 @@ A Telegram bot (`gws-calendar-bot`) that creates and views Google Calendar event
 
 ## How it works
 
-Send Felix a message like "What do I have today?", "Lunch with Sarah on Friday at 1pm", or a photo of an event flyer. It can query your Google Calendar immediately, and it will ask for confirmation before creating new events.
+Send Felix a message like "What do I have today?", "Lunch with Sarah on Friday at 1pm", or a photo of an event flyer. It can query your Google Calendar immediately, and it will ask for confirmation before creating new events — each staged event gets its own Confirm/Cancel buttons, including when multiple events are proposed at once.
 
 ## Setup
 

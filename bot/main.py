@@ -24,12 +24,32 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-_CONFIRM_KEYBOARD = InlineKeyboardMarkup([
-    [
-        InlineKeyboardButton("✅ Confirm", callback_data="confirm"),
-        InlineKeyboardButton("❌ Cancel", callback_data="cancel"),
-    ]
-])
+
+def _short_button_label(summary: str, max_len: int = 30) -> str:
+    title = summary.strip()
+    if len(title) <= max_len:
+        return title
+    return f"{title[: max_len - 3].rstrip()}..."
+
+
+def _confirm_keyboard(events: list[dict]) -> InlineKeyboardMarkup:
+    rows = []
+    for index, event in enumerate(events):
+        label = _short_button_label(event.get("summary") or f"Event {index + 1}")
+        rows.append([
+            InlineKeyboardButton(
+                f"✅ Confirm: {label}",
+                callback_data=f"confirm:{index}",
+            ),
+            InlineKeyboardButton("❌ Cancel", callback_data=f"cancel:{index}"),
+        ])
+    return InlineKeyboardMarkup(rows)
+
+
+async def _refresh_proposal_keyboard(query, chat_id: int) -> None:
+    pending = _pending_events.get(chat_id)
+    markup = _confirm_keyboard(pending) if pending else None
+    await query.edit_message_reply_markup(reply_markup=markup)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -62,7 +82,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def _reply_with_agent_output(update: Update, chat_id: int, reply: str) -> None:
     pending = _pending_events.get(chat_id)
     if pending:
-        await update.message.reply_text(reply, reply_markup=_CONFIRM_KEYBOARD)
+        await update.message.reply_text(reply, reply_markup=_confirm_keyboard(pending))
     else:
         await update.message.reply_text(reply)
 
@@ -106,30 +126,44 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     chat_id = query.message.chat_id
     await query.answer()
 
-    if query.data == "confirm":
-        pending_events = _pending_events.pop(chat_id, None)
+    data = query.data or ""
+    if ":" not in data:
+        await query.message.reply_text("This proposal has already expired.")
+        return
+
+    action, _, index_str = data.partition(":")
+    try:
+        index = int(index_str)
+    except ValueError:
+        await query.message.reply_text("This proposal has already expired.")
+        return
+
+    pending_events = _pending_events.get(chat_id)
+    if not pending_events or index < 0 or index >= len(pending_events):
         await query.edit_message_reply_markup(reply_markup=None)
-        if not pending_events:
-            await query.message.reply_text("This proposal has already expired.")
-            return
+        await query.message.reply_text("This proposal has already expired.")
+        return
 
-        results = []
-        for event in pending_events:
-            results.append(await _run_create_calendar_event(**event))
-
-        if len(results) == 1:
-            await query.message.reply_text(results[0])
+    if action == "confirm":
+        event = pending_events.pop(index)
+        if pending_events:
+            _pending_events[chat_id] = pending_events
         else:
-            numbered_results = [
-                f"{index}. {result}"
-                for index, result in enumerate(results, start=1)
-            ]
-            await query.message.reply_text("\n".join(numbered_results))
-
-    elif query.data == "cancel":
-        _pending_events.pop(chat_id, None)
-        await query.edit_message_reply_markup(reply_markup=None)
-        await query.message.reply_text("Event creation cancelled.")
+            _pending_events.pop(chat_id, None)
+        await _refresh_proposal_keyboard(query, chat_id)
+        result = await _run_create_calendar_event(**event)
+        await query.message.reply_text(result)
+    elif action == "cancel":
+        summary = pending_events[index].get("summary") or "Event"
+        pending_events.pop(index)
+        if pending_events:
+            _pending_events[chat_id] = pending_events
+        else:
+            _pending_events.pop(chat_id, None)
+        await _refresh_proposal_keyboard(query, chat_id)
+        await query.message.reply_text(f"Cancelled: {summary}")
+    else:
+        await query.message.reply_text("This proposal has already expired.")
 
 
 def main() -> None:

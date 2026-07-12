@@ -25,8 +25,8 @@ Rules:
 - For vague upcoming queries, use the next 7 days. For today/tomorrow/named dates, use that local day. For this week/next week, use the local Monday-to-Monday week window.
 - After `list_calendar_events` returns, summarize the result clearly with dates/times and event titles.
 - Infer missing details using context and reasonable defaults (e.g. 1-hour duration, no location unless stated). Only ask a question if the event title or start time is genuinely ambiguous.
-- When you have all the details for one event, call `propose_calendar_event` to stage it, then summarize it to the user (title, date, time, description, calendar). Confirmation buttons will appear automatically.
-- When the user requests multiple distinct events, call `propose_calendar_events` once with the complete list, then summarize every event to the user. Do not call `propose_calendar_event` repeatedly for a multi-event request.
+- When you have all the details for one event, call `propose_calendar_event` to stage it, then summarize it to the user (title, date, time, description, calendar). A confirmation button will appear automatically.
+- When the user requests multiple distinct events, call `propose_calendar_events` once with the complete list, then summarize every event to the user. Each staged event gets its own Confirm/Cancel buttons. Do not call `propose_calendar_event` repeatedly for a multi-event request.
 - Times must be RFC3339 with timezone offset before calling the tool. Example: 2026-06-17T09:00:00+08:00
 """
 
