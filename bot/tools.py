@@ -1,9 +1,12 @@
 import asyncio
 import json
+import logging
 from typing import Any
 
 from agents import function_tool
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 class CalendarEventProposal(BaseModel):
@@ -162,16 +165,25 @@ async def _fetch_calendar_events(
     except asyncio.TimeoutError:
         proc.kill()
         await proc.communicate()
+        logger.error("gws calendar events list timed out (calendar=%s)", calendar_id)
         return [], f"{_calendar_label(calendar_id)}: timed out"
 
     if proc.returncode != 0:
         stderr_text = stderr.decode().strip()
         message = stderr_text or stdout.decode().strip() or "unknown error"
+        logger.error(
+            "gws calendar events list failed (calendar=%s, exit=%s): %s",
+            calendar_id, proc.returncode, message,
+        )
         return [], f"{_calendar_label(calendar_id)}: {message}"
 
     try:
         data = json.loads(stdout.decode())
     except json.JSONDecodeError:
+        logger.error(
+            "gws calendar events list returned invalid JSON (calendar=%s): %s",
+            calendar_id, stdout.decode().strip(),
+        )
         return [], f"{_calendar_label(calendar_id)}: returned invalid JSON"
 
     events = []
@@ -281,8 +293,15 @@ async def _run_create_calendar_event(
     except asyncio.TimeoutError:
         proc.kill()
         await proc.communicate()
+        logger.error("gws calendar +insert timed out (summary=%r)", summary)
         return "Failed to create event: timed out."
 
     if proc.returncode == 0:
         return f"'{summary}' added to your calendar."
-    return f"Failed to create event: {stderr.decode().strip()}"
+
+    stderr_text = stderr.decode().strip()
+    logger.error(
+        "gws calendar +insert failed (summary=%r, exit=%s): %s",
+        summary, proc.returncode, stderr_text,
+    )
+    return f"Failed to create event: {stderr_text}"
