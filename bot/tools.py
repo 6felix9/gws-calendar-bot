@@ -20,6 +20,13 @@ class CalendarEventProposal(BaseModel):
     calendar: str = "primary"
 
 
+class CalendarEventDeleteProposal(BaseModel):
+    event_id: str
+    calendar: str
+    summary: str
+    start: str | None = None
+
+
 # Per-chat pending event proposals awaiting confirmation
 _pending_events: dict[int, list[dict[str, Any]]] = {}
 
@@ -57,6 +64,10 @@ def _resolve_calendar_ids(calendars: list[str] | None) -> list[str]:
     return resolved or all_ids
 
 
+def _resolve_calendar_id(calendar: str) -> str:
+    return _resolve_calendar_ids([calendar])[0]
+
+
 def _calendar_label(calendar_id: str) -> str:
     for name, calendar in CALENDARS.items():
         if calendar["id"] == calendar_id:
@@ -71,13 +82,31 @@ def _shorten(text: str, limit: int = 180) -> str:
     return f"{compact[: limit - 3].rstrip()}..."
 
 
-def _stage_events(chat_id: int, events: list[CalendarEventProposal]) -> int:
-    staged = [event.model_dump() for event in events]
-    if staged:
-        _pending_events[chat_id] = staged
+def _stage_pending(chat_id: int, items: list[dict[str, Any]]) -> int:
+    if items:
+        _pending_events[chat_id] = items
     else:
         _pending_events.pop(chat_id, None)
-    return len(staged)
+    return len(items)
+
+
+def _stage_events(chat_id: int, events: list[CalendarEventProposal]) -> int:
+    staged = [{**event.model_dump(), "action": "create"} for event in events]
+    return _stage_pending(chat_id, staged)
+
+
+def _stage_deletes(chat_id: int, events: list[CalendarEventDeleteProposal]) -> int:
+    staged = [
+        {
+            "action": "delete",
+            "event_id": event.event_id,
+            "calendar": event.calendar,
+            "summary": event.summary,
+            **({"start": event.start} if event.start else {}),
+        }
+        for event in events
+    ]
+    return _stage_pending(chat_id, staged)
 
 
 def make_propose_tools(chat_id: int):
@@ -136,7 +165,55 @@ def make_propose_tools(chat_id: int):
             return "No events staged for confirmation."
         return f"{count} events staged for confirmation."
 
-    return [propose_calendar_event, propose_calendar_events]
+    @function_tool
+    def propose_delete_calendar_event(
+        event_id: str,
+        calendar: str,
+        summary: str,
+        start: str | None = None,
+    ) -> str:
+        """Stage a Google Calendar event deletion for user confirmation.
+
+        Args:
+            event_id: Event ID from list_calendar_events.
+            calendar: Calendar ID from list_calendar_events.
+            summary: Event title for display in confirmation buttons.
+            start: Optional start time for display in the summary.
+        """
+        _stage_deletes(
+            chat_id,
+            [
+                CalendarEventDeleteProposal(
+                    event_id=event_id,
+                    calendar=calendar,
+                    summary=summary,
+                    start=start,
+                )
+            ],
+        )
+        return "Event staged for deletion."
+
+    @function_tool
+    def propose_delete_calendar_events(events: list[CalendarEventDeleteProposal]) -> str:
+        """Stage multiple Google Calendar event deletions for user confirmation.
+
+        Use when the user asks to delete more than one distinct event. Each entry
+        must include event_id, calendar, and summary from list_calendar_events.
+
+        Args:
+            events: The complete list of events to delete after confirmation.
+        """
+        count = _stage_deletes(chat_id, events)
+        if count == 0:
+            return "No events staged for deletion."
+        return f"{count} events staged for deletion."
+
+    return [
+        propose_calendar_event,
+        propose_calendar_events,
+        propose_delete_calendar_event,
+        propose_delete_calendar_events,
+    ]
 
 
 async def _fetch_calendar_events(
@@ -189,6 +266,7 @@ async def _fetch_calendar_events(
     events = []
     for event in data.get("items", []):
         event["calendarLabel"] = _calendar_label(calendar_id)
+        event["calendarId"] = calendar_id
         events.append(event)
     return events, None
 
@@ -240,6 +318,8 @@ async def list_calendar_events(
         end = event.get("end", {}).get("dateTime") or event.get("end", {}).get("date") or "unknown end"
         details = [
             f"- [{event.get('calendarLabel')}] {summary}",
+            f"  Event ID: {event.get('id') or 'unknown'}",
+            f"  Calendar ID: {event.get('calendarId') or 'unknown'}",
             f"  Start: {start}",
             f"  End: {end}",
         ]
@@ -305,3 +385,40 @@ async def _run_create_calendar_event(
         summary, proc.returncode, stderr_text,
     )
     return f"Failed to create event: {stderr_text}"
+
+
+async def _run_delete_calendar_event(
+    event_id: str,
+    calendar: str,
+    summary: str,
+    start: str | None = None,
+) -> str:
+    calendar_id = _resolve_calendar_id(calendar)
+    params = {"calendarId": calendar_id, "eventId": event_id}
+    cmd = [
+        "gws", "calendar", "events", "delete",
+        "--params", json.dumps(params),
+    ]
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        logger.error("gws calendar events delete timed out (summary=%r)", summary)
+        return "Failed to delete event: timed out."
+
+    if proc.returncode == 0:
+        return f"'{summary}' deleted from your calendar."
+
+    stderr_text = stderr.decode().strip()
+    logger.error(
+        "gws calendar events delete failed (summary=%r, exit=%s): %s",
+        summary, proc.returncode, stderr_text,
+    )
+    return f"Failed to delete event: {stderr_text}"
