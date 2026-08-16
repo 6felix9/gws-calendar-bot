@@ -24,6 +24,7 @@ cp .env.example .env
 | `OPENAI_API_KEY` | yes | OpenAI API key |
 | `OWNER_TELEGRAM_ID` | yes | Your Telegram user ID (bot ignores other users) |
 | `USER_TIMEZONE` | no | Default: `Asia/Kuala_Lumpur` |
+| `AGENT_MODEL` | no | Default: `gpt-5.6-luna` |
 | `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` | yes (runtime) | Path to GWS credentials JSON |
 | `GWS_CREDENTIALS` | yes (Railway) | Full JSON written to `/gws-config/credentials.json` at startup |
 | `GWS_CLIENT_SECRET` | yes (Railway) | OAuth client secret JSON written to `/gws-config/client_secret.json` |
