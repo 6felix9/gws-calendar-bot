@@ -3,8 +3,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from collections import defaultdict
 
-from agents import Agent, Runner
+from agents import Agent, ModelSettings, Runner
+from openai.types.shared import Reasoning
 from .tools import CALENDARS, list_calendar_events, make_propose_tools, _pending_events
+
+
+AGENT_MODEL = os.getenv("AGENT_MODEL", "gpt-5.6-luna")
 
 
 _SYSTEM_PROMPT = """\
@@ -66,7 +70,8 @@ async def run_agent(chat_id: int, user_message: str, image_b64: str | None = Non
     now = _now_in_timezone(tz).strftime("%Y-%m-%d %H:%M %z (%A)")
     agent = Agent(
         name="CalendarAssistant",
-        model="gpt-5.1",
+        model=AGENT_MODEL,
+        model_settings=ModelSettings(reasoning=Reasoning(effort="low")),
         instructions=_SYSTEM_PROMPT.format(now=now, tz=tz, calendars=_CALENDAR_PROMPT),
         tools=[*make_propose_tools(chat_id), list_calendar_events],
     )
