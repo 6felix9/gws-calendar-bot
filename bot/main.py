@@ -1,6 +1,8 @@
 import base64
 import logging
 import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -199,6 +201,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.message.reply_text("This proposal has already expired.")
 
 
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, *args) -> None:
+        pass
+
+
+def _start_health_server() -> None:
+    """Cloud Run requires the container to listen on $PORT; the bot itself uses polling."""
+    port = os.environ.get("PORT")
+    if not port:
+        return
+    server = HTTPServer(("0.0.0.0", int(port)), _HealthHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    logger.info("Health server listening on port %s", port)
+
+
 def main() -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     owner_id = int(os.environ["OWNER_TELEGRAM_ID"])
@@ -212,6 +234,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.PHOTO & owner, photo_handler))
     app.add_handler(CallbackQueryHandler(button_handler))
 
+    _start_health_server()
     logger.info("Bot starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 

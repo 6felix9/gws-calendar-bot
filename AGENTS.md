@@ -4,7 +4,7 @@ This file provides guidance to coding agents when working with code in this repo
 
 ## What this project is
 
-Felix's Calendar Agent (`gws-calendar-bot`) is a Telegram bot that acts as a Google Calendar and Google Tasks assistant. Users send natural-language messages (or photos of event details) and the bot creates Google Calendar events or manages Google Tasks on their behalf. The bot is deployed on Railway as the `gws-calendar-bot` service in the **Felix's Calendar Agent** project.
+Felix's Calendar Agent (`gws-calendar-bot`) is a Telegram bot that acts as a Google Calendar and Google Tasks assistant. Users send natural-language messages (or photos of event details) and the bot creates Google Calendar events or manages Google Tasks on their behalf. The bot is deployed on Google Cloud Run as the `gws-calendar-bot` service.
 
 ## Running locally
 
@@ -31,8 +31,8 @@ The `gws` CLI (`@googleworkspace/cli` npm package) must be installed locally for
 | `USER_TIMEZONE` | no | `Asia/Kuala_Lumpur` |
 | `AGENT_MODEL` | no | `gpt-5.6-luna` |
 | `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` | yes (runtime) | `/gws-config/credentials.json` in Docker |
-| `GWS_CREDENTIALS` | yes (Railway) | Written to `/gws-config/credentials.json` at startup |
-| `GWS_CLIENT_SECRET` | yes (Railway) | Written to `/gws-config/client_secret.json` at startup |
+| `GWS_CREDENTIALS` | yes (Cloud Run) | Written to `/gws-config/credentials.json` at startup |
+| `GWS_CLIENT_SECRET` | yes (Cloud Run) | Written to `/gws-config/client_secret.json` at startup |
 
 ## Architecture
 
@@ -53,26 +53,19 @@ Telegram update
 
 ## Deployment
 
-Push to `main` deploys via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) using `railway up` to the **gws-calendar-bot** service. Requires a project-scoped `RAILWAY_TOKEN` GitHub secret.
+Push to `main` deploys via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml): it builds the Docker image, pushes it to Artifact Registry, and runs `gcloud run deploy` on the `gws-calendar-bot` Cloud Run service. GitHub authenticates through Workload Identity Federation (no stored keys); config comes from GitHub repository variables `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_DEPLOY_SERVICE_ACCOUNT`, `GCP_WORKLOAD_IDENTITY_PROVIDER`.
 
-- **Project:** Felix's Calendar Agent
-- **Service:** `gws-calendar-bot`
-- **Volume:** `gws-config` mounted at `/gws-config`
-- **Start:** `scripts/railway-entrypoint.sh` writes GWS JSON from env vars, then runs `python -m bot.main`
+- **Service settings:** min=max=1 instance, CPU always allocated (`--no-cpu-throttling`) because the bot long-polls Telegram
+- **Secrets:** Secret Manager (`TELEGRAM_BOT_TOKEN`, `OPENAI_API_KEY`, `OWNER_TELEGRAM_ID`, `GWS_CREDENTIALS`, `GWS_CLIENT_SECRET`), mounted as env vars
+- **Start:** `scripts/entrypoint.sh` writes GWS JSON from env vars to `/gws-config`, then runs `python -m bot.main`. When `$PORT` is set (Cloud Run), `bot/main.py` also serves a trivial health endpoint.
+- **One-time infra bootstrap:** `PROJECT_ID=... ./scripts/gcp-setup.sh`
 
-## Railway CLI (source of truth for infra)
-
-Do **not** use `.railway/railway.ts` or other in-repo Railway IaC. The globally installed Railway CLI and the Railway dashboard are the single source of truth for service configuration (variables, volumes, build settings, replicas).
-
-Use the CLI for all infra changes:
+Useful commands:
 
 ```bash
-railway link --project "Felix's Calendar Agent" --service gws-calendar-bot
-railway status --json
-railway variable list --service gws-calendar-bot --json
-railway variable set KEY=value --service gws-calendar-bot
-railway logs --service gws-calendar-bot --lines 200
-railway up --service gws-calendar-bot --detach -m "description"
+gcloud run services describe gws-calendar-bot --region <region>
+gcloud run services logs read gws-calendar-bot --region <region> --limit 200
+gcloud secrets versions add NAME --data-file=-
 ```
 
-Secrets are set as Railway service variables on `gws-calendar-bot` (never committed). After changing variables, Railway redeploys automatically unless you pass `--skip-deploys`.
+Never commit secrets. Adding a new secret version does not update a running revision until the next deploy (or `gcloud run services update gws-calendar-bot --region <region> --update-env-vars=REDEPLOY=$(date +%s)`).

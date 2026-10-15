@@ -82,7 +82,7 @@ Incorrect: 2026-06-17T09:00:00Z
 
 ### Authentication
 
-`gws` reads credentials from the path in `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE`. On Railway/Docker this is `/gws-config/credentials.json`, written at startup from the `GWS_CREDENTIALS` env var. Do not hardcode the path — always read from the env var.
+`gws` reads credentials from the path in `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE`. On Cloud Run/Docker this is `/gws-config/credentials.json`, written at startup from the `GWS_CREDENTIALS` env var. Do not hardcode the path — always read from the env var.
 
 ### Skill files
 

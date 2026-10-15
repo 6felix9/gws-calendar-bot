@@ -26,30 +26,31 @@ cp .env.example .env
 | `USER_TIMEZONE` | no | Default: `Asia/Kuala_Lumpur` |
 | `AGENT_MODEL` | no | Default: `gpt-5.6-luna` |
 | `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` | yes (runtime) | Path to GWS credentials JSON |
-| `GWS_CREDENTIALS` | yes (Railway) | Full JSON written to `/gws-config/credentials.json` at startup |
-| `GWS_CLIENT_SECRET` | yes (Railway) | OAuth client secret JSON written to `/gws-config/client_secret.json` |
+| `GWS_CREDENTIALS` | yes (Cloud Run) | Full JSON written to `/gws-config/credentials.json` at startup |
+| `GWS_CLIENT_SECRET` | yes (Cloud Run) | OAuth client secret JSON written to `/gws-config/client_secret.json` |
 
-## Deployment (Railway)
+## Deployment (Google Cloud)
 
-Push to `main` — GitHub Actions runs `railway up` against the **gws-calendar-bot** service in the **Felix's Calendar Agent** project. Add a project-scoped `RAILWAY_TOKEN` as a GitHub secret.
+Runs on **Cloud Run** (one always-on instance, CPU always allocated, since the bot long-polls Telegram), with images in **Artifact Registry** and secrets in **Secret Manager**. Push to `main` — GitHub Actions authenticates via Workload Identity Federation (no JSON keys), builds the image, pushes it, and runs `gcloud run deploy`.
 
-Manual deploy from this directory:
-
-```bash
-railway link --project "Felix's Calendar Agent" --service gws-calendar-bot
-railway up --detach -m "local deploy"
-```
-
-Infra (variables, volumes, service settings) is managed via the Railway CLI or dashboard — not checked into this repo.
-
-Set secrets on the service:
+One-time setup:
 
 ```bash
-railway variable set TELEGRAM_BOT_TOKEN=... --service gws-calendar-bot
-railway variable set OPENAI_API_KEY=... --service gws-calendar-bot
-railway variable set OWNER_TELEGRAM_ID=... --service gws-calendar-bot
-printf '%s' "$GWS_JSON" | railway variable set GWS_CREDENTIALS --stdin --service gws-calendar-bot
-printf '%s' "$CLIENT_SECRET_JSON" | railway variable set GWS_CLIENT_SECRET --stdin --service gws-calendar-bot
+PROJECT_ID=your-project ./scripts/gcp-setup.sh
 ```
 
-After Railway is live, stop the old DigitalOcean container so only one bot polls Telegram.
+The script enables APIs, creates the Artifact Registry repo, service accounts, Secret Manager secrets and the Workload Identity pool, then prints the remaining steps. Add the secret values:
+
+```bash
+printf '%s' "$TELEGRAM_BOT_TOKEN" | gcloud secrets versions add TELEGRAM_BOT_TOKEN --data-file=-
+printf '%s' "$OPENAI_API_KEY" | gcloud secrets versions add OPENAI_API_KEY --data-file=-
+printf '%s' "$OWNER_TELEGRAM_ID" | gcloud secrets versions add OWNER_TELEGRAM_ID --data-file=-
+printf '%s' "$GWS_JSON" | gcloud secrets versions add GWS_CREDENTIALS --data-file=-
+printf '%s' "$CLIENT_SECRET_JSON" | gcloud secrets versions add GWS_CLIENT_SECRET --data-file=-
+```
+
+Then set the GitHub repository **variables** `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_DEPLOY_SERVICE_ACCOUNT` and `GCP_WORKLOAD_IDENTITY_PROVIDER` (values are printed by the setup script).
+
+Logs: `gcloud run services logs read gws-calendar-bot --region <region>`.
+
+Only one instance may run (`--max-instances 1`) so a single process polls Telegram. Stop any old Railway/DigitalOcean deployment before the first GCP deploy.
